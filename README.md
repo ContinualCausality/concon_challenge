@@ -42,19 +42,19 @@ The primary objective is to train models capable of generalizing across these ta
 
 The dataset includes:
 
-### case_disjoint_main
+### disjoint
 - **Purpose**: This folder contains the **disjoint confounder** scenario, where the confounders across tasks are **mutually exclusive**. Each task is confounded by a unique feature, ensuring no overlap in confounders between tasks.
 - **Structure**: The folder is similarly divided into `train/`, `val/`, and `test/` subfolders, corresponding to training, validation, and testing sets for this disjoint setup.
 Each subfolders contain 3 tasks `t0/`, `t1/`, and `t2/` with corresponding folders `0/` and `1/` for negative and positive labels.
 - **Usage**: Ideal for testing models in situations where confounders differ drastically between tasks, making generalization across tasks more challenging.
 
-### case_strict_main
+### strict
 - **Purpose**: This folder contains the **strict confounder** scenario, where the confounders are more persistent across tasks. Unlike the disjoint setup, the confounders in this case may overlap between tasks, making it harder for the model to distinguish the true signal from the spurious associations.
 - **Structure**: The folder is similarly divided into `train/`, `val/`, and `test/` subfolders, corresponding to training, validation, and testing sets for this disjoint setup.
 Each subfolders contain 3 tasks `t0/`, `t1/`, and `t2/` with corresponding folders `0/` and `1/` for negative and positive labels.
 - **Usage**: This case tests the model's ability to handle more challenging confounders that recur across different tasks.
 
-### unconfounded
+### unconf
 - **Purpose**: This folder contains **unconfounded data** that should be used strictly for final evaluation.
 - **Structure**: It contains a `test/` subfolder for evaluation. **Do not use the `train/` and `val/` sets in this folder for training or validation**—they are provided for informational purposes only.
 - **Usage**: After training your model on the confounded tasks, you must test it on the data in `unconfounded/test/` to assess how well it generalizes when no confounders are present. Using any part of the `train/` or `val/` sets for training or tuning will invalidate your results.
