@@ -1,9 +1,10 @@
 import os
 import argparse
 import random
+import math
 
 import numpy as np
-import wandb
+import csv
 
 import torch
 torch.set_num_threads(6)
@@ -13,7 +14,9 @@ from torch.utils.data import DataLoader
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 
+import wandb
 from models import ResNet, BasicBlock
+from utils import *
 
 
 def set_seed(seed=42):
@@ -30,7 +33,7 @@ def set_seed(seed=42):
     torch.backends.cudnn.benchmark = False
 
 
-def run(model, train_loaders, val_loaders, test_loaders, test_loaders_global, wandb, args, device):
+def run(model, train_loaders, val_loaders, test_loaders, wandb, args, device):
 
     t_a_p, t_a_n, tt_acc = [], [], []
         
@@ -64,14 +67,13 @@ def run(model, train_loaders, val_loaders, test_loaders, test_loaders_global, wa
 
 
         t_acc, t_acc_p, t_acc_n = test(model, test_loaders, device)
-        gt_acc, gt_acc_p, gt_acc_n = test(model, test_loaders_global, device)
 
-        t_a_p = t_a_p + t_acc_p + gt_acc_p
-        t_a_n = t_a_n + t_acc_n + gt_acc_n
-        tt_acc = tt_acc + t_acc + gt_acc
+        t_a_p = t_a_p + t_acc_p 
+        t_a_n = t_a_n + t_acc_n 
+        tt_acc = tt_acc + t_acc
 
     row = len(train_loaders)
-    col_t = len(test_loaders) + len(test_loaders_global)
+    col_t = len(test_loaders) 
 
     t_acc_arr_p = np.asarray(t_a_p)
     test_acc_p = t_acc_arr_p.reshape(row, col_t)
@@ -229,6 +231,32 @@ def test(model, test_loader, device):
     return M_a, M_a_p, M_a_n
 
 
+def test_unconf(model, test_loader, test_dataset, device):
+    predictions = []
+
+    with torch.no_grad():
+        for images, _ in test_loader:  
+            images = images.to(device)
+            outputs = model(images)
+            
+            # Get the predicted class
+            _, predicted = torch.max(outputs, 1)
+            
+            # Collect file names and predictions
+            for i, pred in enumerate(predicted):
+                image_file_name = test_dataset.samples[i + len(predictions)][0].split('/')[-1]  # Extract image file name
+                label = pred.item()
+                predictions.append([image_file_name, label])
+
+    # Save predictions to a CSV file and return the file path
+    csv_file_path = 'predictions.csv'
+    with open(csv_file_path, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(["ID", "TARGET"])  # Write the header
+        writer.writerows(predictions)       # Write each image name and prediction
+
+    return csv_file_path
+
 def get_dataset(args):
 
     transformer = transforms.Compose([
@@ -256,14 +284,8 @@ def get_dataset(args):
     BATCH_SIZE = args.batch_size
     kwargs = {'num_workers':0, 'pin_memory':False} 
     
-
     test_global_dataset = datasets.ImageFolder(root=test_global_path, transform=transformer)
-    positives = [i for i, (x, y) in enumerate(test_global_dataset) if  y == 1.0]
-    negatives = [i for i, (x, y) in enumerate(test_global_dataset) if  y == 0.0]
-    testdataset_p = torch.utils.data.Subset(test_global_dataset, positives)
-    testdataset_n = torch.utils.data.Subset(test_global_dataset, negatives)
-    test_loader_p = DataLoader(dataset=testdataset_p, batch_size=BATCH_SIZE, shuffle=True, **kwargs)
-    test_loader_n = DataLoader(dataset=testdataset_n, batch_size=BATCH_SIZE, shuffle=True, **kwargs)
+    test_loader = DataLoader(dataset=test_global_dataset, batch_size=BATCH_SIZE, shuffle=True, **kwargs)
     
     traindataset0 = datasets.ImageFolder(root=train_t0, transform=transformer)
     valdataset0 = datasets.ImageFolder(root=val_t0, transform=transformer)
@@ -328,9 +350,7 @@ def get_dataset(args):
     val_loaders = {0: [val0_loader_p, val0_loader_n], 1: [val1_loader_p, val1_loader_n], 2:[val2_loader_p, val2_loader_n]}
     test_loaders = {0: [test0_loader_p, test0_loader_n], 1: [test1_loader_p, test1_loader_n], 2:[test2_loader_p, test2_loader_n]}
 
-    test_loaders_global = {0: [test_loader_p, test_loader_n]}
-
-    return train_loaders, val_loaders, test_loaders, test_loaders_global
+    return train_loaders, val_loaders, test_loaders, test_loader
 
 
 
@@ -390,7 +410,9 @@ if __name__ == '__main__':
     train_loaders, val_loaders, test_loaders, test_loaders_global = get_dataset(args)
     
     
-    test_acc_p, test_acc_n, test_acc = run(model, train_loaders, val_loaders, test_loaders, test_loaders_global, wandb, args, device)
+    test_acc_p, test_acc_n, test_acc = run(model, train_loaders, val_loaders, test_loaders, wandb, args, device)
+    ### upload the csv file
+    csv_file_path = test_unconf(model, test_loaders_global, test_loaders_global.dataset, device)
 
     if save_model:  
         results = args.results_dir
