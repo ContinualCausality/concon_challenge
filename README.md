@@ -16,24 +16,19 @@ We provide Docker image to setup the development enviroment. To run the docker:
 
 We also provide a starter template to train a Resnet-18 model on the tasks of ConCon dataset in a naive sequential manner. 
 
-    python src/train.py --epochs $EPOCHS --batch_size $BATCHSIZE --model_name $MODEL --dataset_type $DATASET_TYPE \
-        --train_path_task0 $TRAIN_PATH_TASK0 --train_path_task1 $TRAIN_PATH_TASK1 --train_path_task2 $TRAIN_PATH_TASK2 \
-        --val_path_task0 $VAL_PATH_TASK0 --val_path_task1 $VAL_PATH_TASK1 --val_path_task2 $VAL_PATH_TASK2 \
-        --test_path_task0 $TEST_PATH_TASK0 --test_path_task1 $TEST_PATH_TASK1 --test_path_task2 $TEST_PATH_TASK2 \
-        --test_path_global $TEST_PATH_GLOBAL --seed $SEED --results_dir $ROOT_DIR
+    python src/train.py --epochs $EPOCHS --batch_size $BATCHSIZE --model_name $MODEL --dataset_type $DATASET_TYPE --dataset_path $DATASET_PATH 
+    --test_path_global $TEST_PATH_GLOBAL --seed $SEED --results_dir $ROOT_DIR
  
-Here:
 
-``dataset_type`` would correspond to either ``strict`` or ``disjoint``
+Once you have configured your kaggle key, you can download the dataset by running ``kaggle competitions download -c concon``.
+For example, if your dataset lies in the same folder as the train.py file, you can then run:
 
-``train_path_task0`` specifies the path for task 1 dataset 
+    python src/train.py --epochs 50 --batch_size 64 --model_name Resnet --dataset_type strict --dataset_path /strict 
+    --test_path_global /unconf/test/t0 --seed 42 --results_dir /project
 
-``val_path_task0`` specifies the path for task 1 dataset 
+to train and evaluate on the strict dataset.
 
-``test_path_task0`` specifies the path for task 3 dataset 
-
-``test_path_global`` specifies path to the unconfounded dataset
-
+You can then submit the generated csv file containing the predicted labels to kaggle by running ``kaggle competitions submit -c concon -f labels.csv -m "Message"``.
 
 ## Dataset Structure
 
@@ -56,9 +51,8 @@ Each subfolders contain 3 tasks `t0/`, `t1/`, and `t2/` with corresponding folde
 
 ### unconf
 - **Purpose**: This folder contains **unconfounded data** that should be used strictly for final evaluation.
-- **Structure**: It contains a `test/` subfolder for evaluation. **Do not use the `train/` and `val/` sets in this folder for training or validation**—they are provided for informational purposes only.
-- **Usage**: After training your model on the confounded tasks, you must test it on the data in `unconfounded/test/` to assess how well it generalizes when no confounders are present. Using any part of the `train/` or `val/` sets for training or tuning will invalidate your results.
-
+- **Structure**: It contains a `test/` subfolder for evaluation.
+- **Usage**: After training your model on the confounded tasks, you must test it on the data in `unconf/test/t0` to assess how well it generalizes when no confounders are present. 
 
 ## Programming Language and Frameworks
 Participants are free to use **any programming language or framework** (e.g., Python, PyTorch, TensorFlow) for developing their models. 

@@ -5,6 +5,7 @@ import math
 
 import numpy as np
 import csv
+from PIL import Image
 
 import torch
 torch.set_num_threads(6)
@@ -12,11 +13,30 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import torchvision.datasets as datasets
+from torch.utils.data import Dataset
 import torchvision.transforms as transforms
 
 import wandb
 from models import ResNet, BasicBlock
-from utils import *
+
+class CustomImageDataset(Dataset):
+    def __init__(self, image_folder, transform=None):
+        self.image_folder = image_folder
+        self.image_files = [f for f in os.listdir(image_folder) if f.endswith(('.png', '.jpg', '.jpeg'))]
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.image_files)
+
+    def __getitem__(self, idx):
+        img_path = os.path.join(self.image_folder, self.image_files[idx])
+        image = Image.open(img_path).convert("RGB")
+        if self.transform:
+            image = self.transform(image)
+        
+        # Return image, label (dummy for this example), and file name
+        label = -1  
+        return image, label, self.image_files[idx]
 
 
 def set_seed(seed=42):
@@ -31,6 +51,13 @@ def set_seed(seed=42):
     torch.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+
+def sort_file_names(file_names):
+        # file names are "image_1.png2, "image_2.pnf", ..., "image_99.png"
+        # sort them in ascending order
+        sorted_file_names = sorted(file_names, key=lambda x: int(x.split('_')[-1].split('.')[0]))
+        return sorted_file_names
 
 
 def run(model, train_loaders, val_loaders, test_loaders, wandb, args, device):
@@ -231,31 +258,22 @@ def test(model, test_loader, device):
     return M_a, M_a_p, M_a_n
 
 
-def test_unconf(model, test_loader, test_dataset, device):
-    predictions = []
-
+def predict(model, test_loader, device):
+    model.eval()
+    pred_labels = {}
     with torch.no_grad():
-        for images, _ in test_loader:  
-            images = images.to(device)
-            outputs = model(images)
-            
-            # Get the predicted class
-            _, predicted = torch.max(outputs, 1)
-            
-            # Collect file names and predictions
-            for i, pred in enumerate(predicted):
-                image_file_name = test_dataset.samples[i + len(predictions)][0].split('/')[-1]  # Extract image file name
-                label = pred.item()
-                predictions.append([image_file_name, label])
+        for _, data in enumerate(test_loader):
+            image, labels, file_names = data
+            image = image.to(device)
+            labels = labels.to(device)
 
-    # Save predictions to a CSV file and return the file path
-    csv_file_path = 'predictions.csv'
-    with open(csv_file_path, mode='w', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow(["ID", "TARGET"])  # Write the header
-        writer.writerows(predictions)       # Write each image name and prediction
+            output = model(image)
+            pred = output.argmax(dim=1, keepdim=True)
+            for i in range(len(file_names)):
+                pred_labels[file_names[i]] = pred.cpu().numpy().flatten()[i]
+    print(pred_labels)
+    return pred_labels
 
-    return csv_file_path
 
 def get_dataset(args):
 
@@ -267,25 +285,26 @@ def get_dataset(args):
         )
     ])
 
-    train_t0 = args.train_path_task0
-    train_t1 = args.train_path_task1
-    train_t2 = args.train_path_task2
+    train_t0 = args.dataset_path + '/train/images/t0'
+    train_t1 = args.dataset_path + '/train/images/t1'
+    train_t2 = args.dataset_path + '/train/images/t2'
 
-    val_t0 = args.val_path_task0
-    val_t1 = args.val_path_task1
-    val_t2 = args.val_path_task2
+    val_t0 = args.dataset_path + '/val/images/t0'
+    val_t1 = args.dataset_path + '/val/images/t1'
+    val_t2 = args.dataset_path + '/val/images/t2'
 
-    test_t0 = args.test_path_task0
-    test_t1 = args.test_path_task1
-    test_t2 = args.test_path_task2
+    test_t0 = args.dataset_path + '/test/images/t0'
+    test_t1 = args.dataset_path + '/test/images/t1'
+    test_t2 = args.dataset_path + '/test/images/t2'
 
     test_global_path = args.test_path_global
 
     BATCH_SIZE = args.batch_size
     kwargs = {'num_workers':0, 'pin_memory':False} 
     
-    test_global_dataset = datasets.ImageFolder(root=test_global_path, transform=transformer)
-    test_loader = DataLoader(dataset=test_global_dataset, batch_size=BATCH_SIZE, shuffle=True, **kwargs)
+    
+    test_global_dataset = CustomImageDataset(test_global_path, transform=transformer)
+    test_global_loader = DataLoader(dataset=test_global_dataset, batch_size=BATCH_SIZE, shuffle=False, **kwargs)
     
     traindataset0 = datasets.ImageFolder(root=train_t0, transform=transformer)
     valdataset0 = datasets.ImageFolder(root=val_t0, transform=transformer)
@@ -350,8 +369,7 @@ def get_dataset(args):
     val_loaders = {0: [val0_loader_p, val0_loader_n], 1: [val1_loader_p, val1_loader_n], 2:[val2_loader_p, val2_loader_n]}
     test_loaders = {0: [test0_loader_p, test0_loader_n], 1: [test1_loader_p, test1_loader_n], 2:[test2_loader_p, test2_loader_n]}
 
-    return train_loaders, val_loaders, test_loaders, test_loader
-
+    return train_loaders, val_loaders, test_loaders, test_global_loader
 
 
 if __name__ == '__main__':
@@ -361,23 +379,13 @@ if __name__ == '__main__':
     parser.add_argument('--wandb', action='store_true', help='Log run to Weights and Biases.')
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('-results', '--results_dir', type=str, help='path to store results', required=True)
-    parser.add_argument('-name', '--dataset_type', type=str, help='name of experiment')
+    parser.add_argument('-name', '--dataset_type', type=str, help='name of dataset variant')
     parser.add_argument('--save_model', action='store_true', help='save model weights', default=True)
     parser.add_argument('-e', '--epochs', type=int, default=50, help='number of epochs to train our network for')
     parser.add_argument('-b', '--batch_size', type=int, default=64, help='number of images per batch')
     parser.add_argument('-m', '--model_name', type=str, default='Resnet', help='select the model you would like to run training with')
 
-    parser.add_argument('-p0', '--train_path_task0', type=str, help='path for train dataset of task 0')
-    parser.add_argument('-p1', '--train_path_task1', type=str, help='path for train dataset of task 1')
-    parser.add_argument('-p2', '--train_path_task2', type=str, help='path for train dataset of task 2')
-
-    parser.add_argument('-pv0', '--val_path_task0', type=str, help='path for val dataset of task 0')
-    parser.add_argument('-pv1', '--val_path_task1', type=str, help='path for val dataset of task 1')
-    parser.add_argument('-pv2', '--val_path_task2', type=str, help='path for val dataset of task 2')
-
-    parser.add_argument('-pt0', '--test_path_task0', type=str, help='path for test dataset of task 0')
-    parser.add_argument('-pt1', '--test_path_task1', type=str, help='path for test dataset of task 1')
-    parser.add_argument('-pt2', '--test_path_task2', type=str, help='path for test dataset of task 2')
+    parser.add_argument('-path', '--dataset_path', type=str, help='path for dataset for either disjoint or strict')
 
     parser.add_argument('-gt0', '--test_path_global', type=str, help='path for unconfounded test')
 
@@ -408,11 +416,10 @@ if __name__ == '__main__':
     
     print('Loading datasets...')
     train_loaders, val_loaders, test_loaders, test_loaders_global = get_dataset(args)
-    
-    
     test_acc_p, test_acc_n, test_acc = run(model, train_loaders, val_loaders, test_loaders, wandb, args, device)
-    ### upload the csv file
-    csv_file_path = test_unconf(model, test_loaders_global, test_loaders_global.dataset, device)
+
+    pred_labels = predict(model, test_loaders_global, device)
+
 
     if save_model:  
         results = args.results_dir
@@ -421,4 +428,12 @@ if __name__ == '__main__':
         np.save(f'{results}/{dataset_type}/{model_name}/seed_{seed}/test_acc_p.npy', test_acc_p)
         np.save(f'{results}/{dataset_type}/{model_name}/seed_{seed}/test_acc_n.npy', test_acc_n)
         np.save(f'{results}/{dataset_type}/{model_name}/seed_{seed}/test_acc.npy', test_acc)
+
+        ### upload the csv file
+        with open('labels.csv', 'w') as file:
+            file.write("ID,TARGET\n")
+            images_in_order = sort_file_names(list(pred_labels.keys()))
+            for image in images_in_order:
+                image_name = image.split('_')[1].split('.')[0]
+                file.write(f"image_{image_name},{pred_labels[image]}\n")
     
